@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <title>Auth playground</title>
+  </head>
+  <body>
+    <button type="button" onclick="signIn()">Sign in</button>
+    <button type="button" onclick="use()">Use</button>
+    <button type="button" onclick="logout()">Logout</button>
+
+    <div id="log-container">
+      Logs will be shown here...
+    </div>
+
+    <script>
+      let baseURL = "http://localhost:4750/";
+      let client = axios.create({
+        baseURL,
+        headers: {
+          accept: "application/json",
+        },
+      });
+      client.interceptors.request.use((config) => {
+        config.headers.authentication = localStorage.getItem("token");
+        return config;
+      });
+
+      client.interceptors.response.use(
+        (res) => {
+          return res;
+        },
+        async (err) => {
+          const originalRequest = err.config;
+          if(originalRequest.url === '/refreshToken'){
+            logToDiv("we tried to refetch new access token, but fail liao")
+            localStorage.removeItem('token')
+            localStorage.removeItem('refreshToken')
+          }
+          if (err.response) {
+            if (
+              err.response.data.message === "jwt expired" &&
+              !originalRequest._retry && originalRequest.url !== '/refreshToken'
+            ) {
+              logToDiv("trying to refresh the access token");
+              originalRequest._retry = true;
+              return client
+                .post("/refreshToken", {
+                  refreshToken: localStorage.getItem("refreshToken"),
+                })
+                .then((res) => {
+                  logToDiv(
+                    "fetched new access token and refresh and storing now"
+                  );
+                  localStorage.setItem(
+                    "refreshToken",
+                    res.data.newRefreshToken
+                  );
+                  localStorage.setItem("token", res.data.token);
+                  axios.defaults.headers.authentication = res.data.token;
+                  logToDiv("calling the original request now");
+                  logToDiv("------------------");
+                  return client(originalRequest);
+                });
+            }
+          }
+          return Promise.reject(err);
+        }
+      );
+      function logToDiv(log) {
+        let container = document.getElementById("log-container");
+        let p = document.createElement("p");
+        p.appendChild(document.createTextNode(log));
+        container.appendChild(p);
+      }
+
+      function errHandler(err) {
+        console.log(err);
+        if (err.response) {
+          logToDiv(err.response.data.message);
+        } else if (err.request) {
+          logToDiv(err.request.data.message);
+        } else {
+          logToDiv(err.message);
+        }
+      }
+
+      async function signIn() {
+        try {
+          let { data } = await client.post("login", {
+            username: "leehoemun",
+            password: "leehoemun123",
+          });
+          logToDiv("storing tokens to local storage");
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("refreshToken", data.refreshToken);
+          logToDiv("success login");
+          logToDiv("------------------");
+        } catch (err) {
+          errHandler(err);
+        }
+      }
+
+      async function use() {
+        try {
+          await client.post("verifyToken");
+          logToDiv("Token can be used");
+          logToDiv("------------------");
+        } catch (err) {
+          errHandler(err);
+        }
+      }
+
+      async function logout() {
+        try {
+          localStorage.removeItem('token')
+          localStorage.removeItem('refreshToken')
+          logToDiv("Logout liao")
+          logToDiv("------------------");
+        } catch (err) {
+          errHandler(err);
+        }
+      }
+    </script>
+  </body>
+</html>
